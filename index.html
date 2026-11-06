@@ -277,7 +277,7 @@ function saveValue(key, value) {
 }
 
 function newBall(x, y, vx, vy) {
-  return { x: x, y: y, vx: vx, vy: vy, r: BALL_R, trail: [], stuck: 0, slingChain: 0 };
+  return { x: x, y: y, vx: vx, vy: vy, r: BALL_R, trail: [], stuck: 0, slingChain: 0, frisch: false };
 }
 
 // Solange mehrere Bälle im Spiel sind, zählt jeder Treffer entsprechend mehr
@@ -307,8 +307,9 @@ function launchBall() {
   const b = balls[0];
   const power = charge;
   b.vy = -(LAUNCH_MIN + (LAUNCH_MAX - LAUNCH_MIN) * power);
-  b.vx = 0;
+  b.vx = 90;   // leicht nach rechts: Die Kugel rollt an der Außenwand der Rinne hoch
   b.y = PLUNGER_Y - b.r;
+  b.frisch = true;
   state = 'play';
   started = true;
   charging = false;
@@ -323,7 +324,9 @@ function startMultiball() {
     announce('JACKPOT!', '+1000 PUNKTE', theme.ui.ok);
     return;
   }
-  balls.push(newBall(LANE_X, PLUNGER_Y - BALL_R, 0, -1500));
+  const neu = newBall(LANE_X, PLUNGER_Y - BALL_R, 90, -1500);
+  neu.frisch = true;
+  balls.push(neu);
   announce('MULTIBALL!', 'ALLE PUNKTE x' + balls.length, theme.ui.title, 2);
   slowMotion = 0.7;
   celebrate();
@@ -740,8 +743,11 @@ function collideWall(b, w) {
   const hit = hitLine(b, w.ax, w.ay, w.bx, w.by);
   if (!hit || hit.vn >= 0) return;
 
-  // Bei sehr langsamen Stößen nicht mehr hüpfen, sonst zittert der Ball
-  bounce(b, hit, hit.vn > -30 ? 0 : WALL_BOUNCE);
+  // Bei sehr langsamen Stößen nicht mehr hüpfen, sonst zittert der Ball.
+  // Frisch abgeschossene Kugel: Sie läuft wie auf einer Schiene am Außenrand entlang
+  // und kommt links über die Rinne zum Schläger, statt von der Wand in die Mitte zu prallen.
+  const gleiten = b.frisch && w.role === 'outer' && -hit.vn < 0.95 * Math.hypot(b.vx, b.vy);
+  bounce(b, hit, hit.vn > -30 || gleiten ? 0 : WALL_BOUNCE);
 
   if (hit.vn < -500) {
     spawnSparks(hit.x, hit.y, theme.ember, 4);
@@ -771,6 +777,7 @@ function collideBumper(b, bumper) {
   if (dist >= minDist || dist === 0) return;
 
   b.slingChain = 0;
+  b.frisch = false;
   const nx = dx / dist, ny = dy / dist;
   b.x = bumper.x + nx * minDist;
   b.y = bumper.y + ny * minDist;
@@ -797,6 +804,7 @@ function collideTarget(b, bank, t) {
   const hit = hitLine(b, t.ax, t.ay, t.bx, t.by);
   if (!hit || hit.vn >= 0) return;
   b.slingChain = 0;
+  b.frisch = false;
   bounce(b, hit, WALL_BOUNCE);
   if (hit.vn > -60) return;
 
@@ -844,6 +852,7 @@ function collideFlipper(b, f) {
   if (dist >= minDist || dist === 0) return;
 
   b.slingChain = 0;
+  b.frisch = false;
   const nx = dx / dist, ny = dy / dist;
   b.x = c.x + nx * minDist;
   b.y = c.y + ny * minDist;
@@ -904,6 +913,7 @@ function rescueFromSling(b) {
 // Bewegt einen Ball um einen Schritt. Rückgabe: was mit ihm passiert ist
 function stepBall(b, dt) {
   b.vy += GRAVITY * dt;
+  if (b.frisch && b.y > 640 && b.x < 436) b.frisch = false;
   b.x += b.vx * dt;
   b.y += b.vy * dt;
 
@@ -975,8 +985,9 @@ function physicsStep(dt) {
     }
     if (result === 'lane') {             // Im Multiball wird der Ball automatisch neu abgeschossen
       b.y = PLUNGER_Y - BALL_R;
-      b.vx = 0;
+      b.vx = 90;
       b.vy = -1400;
+      b.frisch = true;
     } else {
       balls.splice(i, 1);
       if (result === 'drain') {
